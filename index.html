@@ -1,0 +1,441 @@
+// ========================================
+// CONFIGURATION ET INITIALISATION FIREBASE
+// ========================================
+// REMPLACER PAR VOTRE CONFIGURATION FIREBASE RÉELLE !
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
+
+// Initialisation (compatible v9)
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+
+// ========================================
+// UTILS
+// ========================================
+
+/**
+ * Affiche une notification toast.
+ * @param {string} message Le message à afficher.
+ * @param {string} type 'success', 'error', ou 'info'.
+ */
+function afficherNotification(message, type = 'info') {
+    const notificationBox = document.getElementById('notification');
+    notificationBox.textContent = message;
+    notificationBox.style.display = 'block';
+    
+    let color = 'var(--primary-color)';
+    if (type === 'error') color = 'var(--danger-color)';
+    if (type === 'success') color = 'var(--secondary-color)';
+    
+    notificationBox.style.borderLeftColor = color;
+    
+    // Masquer après 5 secondes
+    setTimeout(() => {
+        notificationBox.style.display = 'none';
+    }, 5000);
+}
+
+// ========================================
+// GESTION DES ONGLETS ET DE L'AFFICHAGE
+// ========================================
+
+function showTab(tabId) {
+    // Masquer tout le contenu
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    // Désactiver tous les boutons
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Afficher le contenu sélectionné
+    document.getElementById(tabId).classList.add('active');
+    // Activer le bouton correspondant
+    document.querySelector(`.tab[onclick="showTab('${tabId}')"]`).classList.add('active');
+}
+
+function switchAuthTab(tabType) {
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const loginTab = document.querySelector('.auth-tab:nth-child(1)');
+    const registerTab = document.querySelector('.auth-tab:nth-child(2)');
+
+    if (tabType === 'login') {
+        loginForm.classList.add('active');
+        registerForm.classList.remove('active');
+        loginTab.classList.add('active');
+        registerTab.classList.remove('active');
+    } else {
+        registerForm.classList.add('active');
+        loginForm.classList.remove('active');
+        registerTab.classList.add('active');
+        loginTab.classList.remove('active');
+    }
+    // Cacher les messages d'erreur/succès lors du changement d'onglet
+    document.getElementById('authError').textContent = '';
+    document.getElementById('authSuccess').textContent = '';
+}
+
+// ========================================
+// AUTHENTIFICATION FIREBASE
+// ========================================
+
+auth.onAuthStateChanged(user => {
+    const authModal = document.getElementById('authModal');
+    if (user) {
+        // Utilisateur connecté
+        authModal.style.display = 'none';
+        afficherNotification(`Bienvenue, ${user.displayName || user.email}!`, 'success');
+        chargerProfil(user.uid);
+    } else {
+        // Utilisateur déconnecté
+        authModal.style.display = 'flex';
+        // Vider les champs pour un nouvel essai
+        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginPassword').value = '';
+    }
+});
+
+async function connexion(e) {
+    e.preventDefault();
+    const email = document.getElementById('loginEmail').value;
+    const password = document.getElementById('loginPassword').value;
+    const errorBox = document.getElementById('authError');
+    errorBox.textContent = ''; // Vider les erreurs précédentes
+
+    try {
+        await auth.signInWithEmailAndPassword(email, password);
+        // La fonction onAuthStateChanged gérera la suite (masquer la modal)
+    } catch (error) {
+        console.error("Erreur de connexion:", error);
+        errorBox.textContent = "Erreur de connexion : " + (error.message || "Veuillez vérifier vos identifiants.");
+    }
+}
+
+async function inscription(e) {
+    e.preventDefault();
+    const email = document.getElementById('registerEmail').value;
+    const password = document.getElementById('registerPassword').value;
+    const name = document.getElementById('registerName').value;
+    const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
+    const errorBox = document.getElementById('authError');
+    const successBox = document.getElementById('authSuccess');
+    errorBox.textContent = '';
+    successBox.textContent = '';
+
+    if (password !== passwordConfirm) {
+        errorBox.textContent = "Les mots de passe ne correspondent pas.";
+        return;
+    }
+
+    try {
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+        
+        // 1. Mettre à jour le nom d'affichage de l'utilisateur
+        await userCredential.user.updateProfile({ displayName: name });
+        
+        // 2. Créer le document utilisateur dans Firestore
+        await db.collection('users').doc(userCredential.user.uid).set({
+            nom: name,
+            email: email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        successBox.textContent = "Compte créé avec succès! Connexion automatique...";
+        // La fonction onAuthStateChanged gérera la suite
+    } catch (error) {
+        console.error("Erreur d'inscription:", error);
+        errorBox.textContent = "Erreur d'inscription : " + (error.message || "Une erreur est survenue.");
+    }
+}
+
+
+// ========================================
+// GESTION DU PROFIL (CRUD)
+// ========================================
+
+/**
+ * Charge les données du profil depuis Firestore et remplit les champs.
+ * @param {string} uid L'UID de l'utilisateur.
+ */
+async function chargerProfil(uid) {
+    const docRef = db.collection('users').doc(uid);
+    const doc = await docRef.get();
+    
+    if (doc.exists) {
+        const data = doc.data();
+        document.getElementById('nom').value = data.nom || '';
+        document.getElementById('sexe').value = data.sexe || 'femme';
+        document.getElementById('age').value = data.age || '';
+        document.getElementById('taille').value = data.taille || '';
+        document.getElementById('poids').value = data.poids || '';
+        document.getElementById('objectif').value = data.objectif || '';
+        document.getElementById('activite').value = data.activite || '1.2';
+        
+        // Calculer et afficher le bilan après le chargement
+        calculerProfil(false); // Calculer mais ne pas sauvegarder (l'utilisateur n'a pas cliqué sur le bouton)
+        afficherNotification("Profil chargé depuis le cloud.", 'info');
+    } else {
+        afficherNotification("Aucun profil trouvé. Créez votre profil ci-dessous.", 'info');
+    }
+}
+
+/**
+ * Sauvegarde les données du profil dans Firestore.
+ */
+async function sauvegarderProfil() {
+    const user = auth.currentUser;
+    if (!user) {
+        afficherNotification("Erreur : Non connecté.", 'error');
+        return;
+    }
+    
+    // Récupérer les valeurs du formulaire
+    const profilData = {
+        nom: document.getElementById('nom').value,
+        sexe: document.getElementById('sexe').value,
+        age: parseInt(document.getElementById('age').value) || null,
+        taille: parseInt(document.getElementById('taille').value) || null,
+        poids: parseFloat(document.getElementById('poids').value) || null,
+        objectif: parseFloat(document.getElementById('objectif').value) || null,
+        activite: parseFloat(document.getElementById('activite').value) || 1.2,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    
+    try {
+        const syncIndicator = document.getElementById('syncIndicator');
+        syncIndicator.textContent = '⏳ Synchronisation...';
+        syncIndicator.style.display = 'block';
+
+        await db.collection('users').doc(user.uid).set(profilData, { merge: true });
+
+        syncIndicator.textContent = '✅ Synchronisé !';
+        setTimeout(() => syncIndicator.style.display = 'none', 2000);
+
+        afficherNotification("Profil sauvegardé avec succès!", 'success');
+        calculerProfil(false); // Recalculer le bilan au cas où des valeurs auraient changé
+    } catch (error) {
+        console.error("Erreur de sauvegarde du profil:", error);
+        afficherNotification("Erreur lors de la sauvegarde du profil.", 'error');
+    }
+}
+
+// ========================================
+// FONCTION SPÉCIALE : SUPPRESSION DE CHAMP FIREBASE
+// (Implémentation de FieldValue.delete())
+// ========================================
+
+/**
+ * Demande une confirmation avant de supprimer un champ.
+ * @param {string} fieldName Le nom du champ à supprimer.
+ */
+function confirmerSuppressionChamp(fieldName) {
+    if (confirm(`Êtes-vous sûr de vouloir supprimer définitivement le champ '${fieldName}' de votre document Firestore ?`)) {
+        supprimerChampDuProfil(fieldName);
+    }
+}
+
+/**
+ * Supprime un champ spécifié du document Firestore de l'utilisateur actuel.
+ * UTILISE : firebase.firestore.FieldValue.delete()
+ * @param {string} fieldName Le nom du champ à supprimer (ex: 'nom').
+ */
+async function supprimerChampDuProfil(fieldName) {
+    const user = auth.currentUser;
+    if (!user) {
+        afficherNotification("Erreur : Utilisateur non connecté.", 'error');
+        return;
+    }
+
+    const userDocRef = db.collection('users').doc(user.uid);
+    
+    // Obtenez la référence au champ de suppression Firestore
+    const deleteField = firebase.firestore.FieldValue.delete();
+
+    // Créez l'objet de mise à jour: { 'nom-du-champ': FieldValue.delete() }
+    const updateObject = {};
+    updateObject[fieldName] = deleteField; 
+    updateObject['updatedAt'] = firebase.firestore.FieldValue.serverTimestamp();
+
+    try {
+        await userDocRef.update(updateObject);
+
+        // Effacer le contenu de l'input du formulaire côté client
+        const inputElement = document.getElementById(fieldName);
+        if (inputElement) {
+             inputElement.value = '';
+        }
+        
+        afficherNotification(`✅ Le champ '${fieldName}' a été supprimé de votre profil Firestore.`, 'success');
+        // Recharger le profil pour rafraîchir le formulaire (optionnel)
+        chargerProfil(user.uid); 
+
+    } catch (error) {
+        console.error(`Erreur lors de la suppression du champ '${fieldName}':`, error);
+        afficherNotification(`❌ Erreur : Impossible de supprimer le champ ${fieldName}.`, 'error');
+    }
+}
+
+
+// ========================================
+// CALCULS ET LOGIQUE MÉTIER
+// ========================================
+
+/**
+ * Calcule l'IMC, le Poids Idéal et l'objectif calorique.
+ */
+function calculerProfil(save = true) {
+    const age = parseInt(document.getElementById('age').value);
+    const taille = parseInt(document.getElementById('taille').value) / 100; // en mètres
+    const poids = parseFloat(document.getElementById('poids').value);
+    const objectif = parseFloat(document.getElementById('objectif').value);
+    const activiteFactor = parseFloat(document.getElementById('activite').value);
+    const sexe = document.getElementById('sexe').value;
+
+    if (!taille || !poids || !age) {
+        document.getElementById('resultatProfil').style.display = 'none';
+        return;
+    }
+
+    // 1. Calcul de l'IMC
+    const imc = poids / (taille * taille);
+    document.getElementById('imcValue').textContent = imc.toFixed(1);
+
+    // Catégorie IMC
+    let categorie = '';
+    if (imc < 18.5) categorie = "Insuffisance pondérale";
+    else if (imc >= 18.5 && imc < 25) categorie = "Poids normal (Santé !)";
+    else if (imc >= 25 && imc < 30) categorie = "Surpoids";
+    else categorie = "Obésité";
+    document.getElementById('imcCategorie').innerHTML = `**Catégorie IMC :** <span style="color: ${imc < 18.5 || imc >= 25 ? 'var(--danger-color)' : 'var(--secondary-color)'}">${categorie}</span>`;
+
+    // 2. Calcul du Poids Idéal (Formule de Lorentz simplifiée)
+    let poidsIdeal;
+    if (sexe === 'homme') {
+        poidsIdeal = 50 + 0.9 * (taille * 100 - 150);
+    } else { // femme
+        poidsIdeal = 45 + 0.9 * (taille * 100 - 150);
+    }
+    document.getElementById('poidsIdealValue').textContent = poidsIdeal.toFixed(1);
+
+    // 3. Poids à perdre
+    let aPerdre = 0;
+    if (objectif && poids) {
+        aPerdre = poids - objectif;
+    }
+    document.getElementById('aPerdrValue').textContent = aPerdre.toFixed(1);
+
+
+    // 4. Métabolisme de Base (MB) - Formule de Mifflin-St Jeor
+    let mb;
+    if (sexe === 'homme') {
+        mb = (10 * poids) + (6.25 * taille * 100) - (5 * age) + 5;
+    } else { // femme
+        mb = (10 * poids) + (6.25 * taille * 100) - (5 * age) - 161;
+    }
+
+    // Dépense Énergétique Totale (DET)
+    const det = mb * activiteFactor;
+    
+    // Calories pour l'objectif (Déficit de 500 kcal pour perdre 0.5 kg/semaine)
+    let caloriesObjectif = det - 500;
+    
+    // S'assurer de ne pas descendre sous un seuil critique (simple sécurité)
+    if (caloriesObjectif < 1200) caloriesObjectif = 1200; 
+
+    document.getElementById('caloriesValue').textContent = Math.round(caloriesObjectif);
+    
+    document.getElementById('resultatProfil').style.display = 'block';
+
+    // Sauvegarder automatiquement après le calcul si demandé
+    if (save) {
+        sauvegarderProfil();
+    }
+}
+
+
+// ========================================
+// LOGIQUE DE SUIVI DE POIDS (SIMPLIFIÉE)
+// ========================================
+
+async function enregistrerPoids() {
+    const user = auth.currentUser;
+    if (!user) {
+        afficherNotification("Veuillez vous connecter pour enregistrer votre poids.", 'error');
+        return;
+    }
+
+    const date = document.getElementById('suiviDate').value;
+    const poids = parseFloat(document.getElementById('suiviPoids').value);
+
+    if (!date || !poids || isNaN(poids)) {
+        afficherNotification("Veuillez entrer une date et un poids valides.", 'error');
+        return;
+    }
+
+    try {
+        await db.collection('users').doc(user.uid).collection('poids_historique').add({
+            date: date,
+            poids: poids,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        afficherNotification("Poids enregistré avec succès!", 'success');
+        chargerHistoriquePoids(user.uid);
+    } catch (error) {
+        console.error("Erreur lors de l'enregistrement du poids:", error);
+        afficherNotification("Erreur lors de l'enregistrement du poids.", 'error');
+    }
+}
+
+/**
+ * Charge et affiche l'historique de poids.
+ */
+async function chargerHistoriquePoids(uid) {
+    const historiqueList = document.getElementById('historiquePoids');
+    historiqueList.innerHTML = ''; // Vider la liste
+    
+    try {
+        const snapshot = await db.collection('users').doc(uid).collection('poids_historique')
+            .orderBy('date', 'desc')
+            .limit(10) // Limiter aux 10 derniers
+            .get();
+
+        if (snapshot.empty) {
+            historiqueList.innerHTML = '<li style="color: var(--text-light); text-align: center; padding: 20px;">Aucun poids enregistré.</li>';
+            return;
+        }
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const li = document.createElement('li');
+            li.className = 'weight-item';
+            
+            // Formatage de la date (simple)
+            const formattedDate = new Date(data.date).toLocaleDateString('fr-FR');
+            
+            li.innerHTML = `
+                <div>
+                    <strong>${formattedDate}</strong> : ${data.poids.toFixed(1)} kg
+                </div>
+                `;
+            historiqueList.appendChild(li);
+        });
+    } catch (error) {
+        console.error("Erreur lors du chargement de l'historique de poids:", error);
+    }
+}
+
+// Initialisation de la date par défaut sur l'onglet Suivi
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('suiviDate').valueAsDate = new Date();
+});
+    </script>
